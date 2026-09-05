@@ -48,12 +48,14 @@ fi
 
 # --- 3. model downloaden (eenmalig) ---
 MODEL_DIR=/workspace/models/qwen
+MODEL_REPO="huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF"
+MODEL_NAME="Huihui-Qwen3.8-27B-abliterated-Q6_K.gguf"
 if [ -z "$(find "$MODEL_DIR" -name '*.gguf' 2>/dev/null)" ]; then
-  echo "model: downloaden naar $MODEL_DIR (~21 GB)"
+  echo "model: $MODEL_NAME downloaden naar $MODEL_DIR (~22 GB)"
   pip install -q -U huggingface_hub >/dev/null 2>&1
   mkdir -p "$MODEL_DIR"
-  hf download douyamv/Qwen3.8-27B-abliterated-GGUF --include "*Q6_K*" --local-dir "$MODEL_DIR" \
-    || huggingface-cli download douyamv/Qwen3.8-27B-abliterated-GGUF --include "*Q6_K*" --local-dir "$MODEL_DIR"
+  hf download "$MODEL_REPO" "$MODEL_NAME" --local-dir "$MODEL_DIR" \
+    || huggingface-cli download "$MODEL_REPO" "$MODEL_NAME" --local-dir "$MODEL_DIR"
 else
   echo "model: al aanwezig, overslaan"
 fi
