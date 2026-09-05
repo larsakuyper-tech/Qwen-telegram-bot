@@ -1,0 +1,8 @@
+# Nooit committen: bevat geheimen
+.env
+
+# Python rommel
+__pycache__/
+*.pyc
+.venv/
+venv/
