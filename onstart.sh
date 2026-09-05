@@ -29,7 +29,7 @@ echo "== llama-server starten =="
 nohup /workspace/llama.cpp/build/bin/llama-server \
   -hf "$MODEL_HF" \
   -ngl 99 -c 32768 --jinja \
-  --host 127.0.0.1 --port 8080 \
+  --host 127.0.0.1 --port 18081 \
   > /workspace/llama.log 2>&1 &
 
 # 4. Bot-dependencies + bot starten
