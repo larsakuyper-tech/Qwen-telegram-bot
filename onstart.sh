@@ -5,7 +5,6 @@
 
 export LLAMA_CACHE=/workspace/models          # model blijft bewaard bij "stop"
 export BOT_WORKDIR="${BOT_WORKDIR:-/workspace}"
-MODEL_HF="douyamv/Qwen3.8-27B-abliterated-GGUF:Q6_K"
 PORT=18081
 REPO="https://github.com/larsakuyper-tech/Qwen-telegram-bot.git"
 LLAMA_BIN=/workspace/llama.cpp/build/bin/llama-server
@@ -47,19 +46,38 @@ else
   echo "llama.cpp: al gebouwd, overslaan"
 fi
 
-# --- 3. llama-server starten (downloadt het model de eerste keer) ---
+# --- 3. model downloaden (eenmalig) ---
+MODEL_DIR=/workspace/models/qwen
+if [ -z "$(find "$MODEL_DIR" -name '*.gguf' 2>/dev/null)" ]; then
+  echo "model: downloaden naar $MODEL_DIR (~21 GB)"
+  pip install -q -U huggingface_hub >/dev/null 2>&1
+  mkdir -p "$MODEL_DIR"
+  hf download douyamv/Qwen3.8-27B-abliterated-GGUF --include "*Q6_K*" --local-dir "$MODEL_DIR" \
+    || huggingface-cli download douyamv/Qwen3.8-27B-abliterated-GGUF --include "*Q6_K*" --local-dir "$MODEL_DIR"
+else
+  echo "model: al aanwezig, overslaan"
+fi
+# eerste gguf pakken; bij een gesplitst model is dat deel 1 (llama.cpp vindt de rest zelf)
+MODEL_FILE=$(find "$MODEL_DIR" -name '*.gguf' | sort | head -n 1)
+if [ -z "$MODEL_FILE" ]; then
+  echo "FOUT: geen .gguf gevonden in $MODEL_DIR"
+  exit 1
+fi
+echo "model: $MODEL_FILE"
+
+# --- 4. llama-server starten ---
 if pgrep -f "llama-server" >/dev/null; then
   echo "llama-server: draait al"
 else
   echo "llama-server: starten op poort $PORT"
   nohup "$LLAMA_BIN" \
-    -hf "$MODEL_HF" \
+    -m "$MODEL_FILE" \
     -ngl 99 -c 32768 --jinja \
     --host 127.0.0.1 --port "$PORT" \
     > /workspace/llama.log 2>&1 &
 fi
 
-# --- 4. bot starten ---
+# --- 5. bot starten ---
 if pgrep -f "python3 bot.py" >/dev/null; then
   echo "bot: draait al"
 else
