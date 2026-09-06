@@ -79,8 +79,10 @@ else
     > /workspace/llama.log 2>&1 &
 fi
 
-# --- 5. bot starten ---
-if pgrep -f "python3 bot.py" >/dev/null; then
+# --- 5. bot starten (alleen als START_BOT=1; de bot draait normaal thuis in de ai-bot LXC) ---
+if [ "${START_BOT:-0}" != "1" ]; then
+  echo "bot: uit (START_BOT niet op 1), draait thuis"
+elif pgrep -f "python3 bot.py" >/dev/null; then
   echo "bot: draait al"
 else
   echo "bot: starten"
