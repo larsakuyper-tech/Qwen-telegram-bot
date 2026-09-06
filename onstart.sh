@@ -74,7 +74,7 @@ else
   echo "llama-server: starten op poort $PORT"
   nohup "$LLAMA_BIN" \
     -m "$MODEL_FILE" \
-    -ngl 99 -c 131072 -fa on -ctk q8_0 -ctv q8_0 --jinja --reasoning-budget 0 \
+    -ngl 99 -c 131072 -fa on -ctk q8_0 -ctv q8_0 --jinja \
     --host 127.0.0.1 --port "$PORT" \
     > /workspace/llama.log 2>&1 &
 fi
