@@ -173,8 +173,13 @@ def ask_llm_sync(chat_id: int, text: str) -> str:
     return reply
 
 
+# Het model schrijft de taal van het codeblok niet altijd in kleine letters ("```Shell") en soms als
+# "console"/"zsh"; zonder deze tolerantie verscheen zo'n blok als tekst zonder knop en gebeurde er niets.
+CODEBLOK = re.compile(r"```(?:sh|bash|shell|zsh|console|shellscript)?[ \t]*\r?\n(.*?)```", re.S | re.I)
+
+
 def extract_commands(text: str) -> list[str]:
-    blocks = re.findall(r"```(?:sh|bash|shell)?\s*\n(.*?)```", text, re.S)
+    blocks = CODEBLOK.findall(text)
     return [b.strip() for b in blocks if b.strip()]
 
 
