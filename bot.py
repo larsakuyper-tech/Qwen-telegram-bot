@@ -71,12 +71,14 @@ pending: dict[str, str] = {}            # callback-id -> commando
 # ---------- helpers ----------
 
 # Commando's die niets kunnen wijzigen. Alles wat hier niet op staat, krijgt de bevestigingsknop.
+# Bewust NIET op de lijst: find (-delete/-exec), xargs (voert alles uit), env (start een programma),
+# awk (system()) — die vragen gewoon de knop. sed staat erop, maar zonder -i en zonder w-commando.
 READONLY_CMDS = {
-    "ls", "cat", "head", "tail", "grep", "egrep", "fgrep", "rg", "find", "sed", "awk",
+    "ls", "cat", "head", "tail", "grep", "egrep", "fgrep", "rg", "sed",
     "wc", "cut", "sort", "uniq", "tr", "file", "stat", "du", "df", "pwd", "echo", "which",
-    "type", "basename", "dirname", "readlink", "realpath", "date", "whoami", "id", "env",
+    "type", "basename", "dirname", "readlink", "realpath", "date", "whoami", "id",
     "printenv", "hostname", "uname", "ps", "free", "uptime", "tree", "diff", "cmp", "md5sum",
-    "sha256sum", "column", "nl", "jq", "python3", "xargs", "true", "cd", "test",
+    "sha256sum", "column", "nl", "jq", "true", "cd", "test",
 }
 # Subcommando's die per hoofdcommando veilig zijn
 READONLY_SUB = {
@@ -133,8 +135,10 @@ def is_readonly(cmd: str) -> bool:
             if not rest or rest[0] not in subs:
                 return False
             continue
-        if base == "sed":         # sed -i schrijft
-            if any(t == "-i" or t.startswith("-i") for t in tokens[1:]):
+        if base == "sed":         # sed -i schrijft; een w/W-commando in het script ook ("sed 'w bestand'")
+            if any(t == "-i" or t.startswith("-i") or t == "--in-place" for t in tokens[1:]):
+                return False
+            if any(re.search(r"(^|[;\n{])\s*[wW]\s", t + " ") for t in tokens[1:] if not t.startswith("-")):
                 return False
             continue
         if base == "python3":     # alleen python3 -c/-m mag niet blind; -c kan alles
