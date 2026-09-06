@@ -33,8 +33,10 @@ API_BASE = os.environ.get("LLM_API_BASE", "http://127.0.0.1:8080/v1")
 WORKDIR = os.environ.get("BOT_WORKDIR", "/workspace")
 
 CMD_TIMEOUT = 120        # seconden per commando
-MAX_OUTPUT = 3500        # tekens output die terug naar Telegram + model gaan
-MAX_HISTORY = 40         # berichten in het geheugen per chat
+MAX_OUTPUT_MODEL = 40000   # tekens commando-output die het model te zien krijgt (~10K tokens)
+MAX_TG_MESSAGES = 3        # max aantal Telegram-berichten (à 4000 tekens) per commando-output; de rest ziet alleen het model
+MAX_OUTPUT_TG = MAX_TG_MESSAGES * 4000
+MAX_HISTORY_CHARS = 200000 # totale grootte van het gespreksgeheugen (~50K tokens); oudste eruit als het meer wordt
 
 SYSTEM_PROMPT = f"""Je bent een technische assistent met shell-toegang op een Linux-server.
 Werkmap: {WORKDIR}. De projecten daar: accountability-bot (server), AccountabilityBotApp (Android)
@@ -46,6 +48,9 @@ Regels:
 - Bestaande bestanden lees je eerst (cat, sed -n '1,80p'), daarna pas aanpassen (sed -i, of hele bestand opnieuw schrijven).
 - Kleine wijzigingen per stap. Eén logische stap per antwoord; je krijgt de output terug en gaat dan verder.
 - Geen interactieve programma's (vim, nano, top, less).
+- Houd output compact: gebruik head/tail, grep -n met gerichte patronen, sed -n 'a,bp' voor een
+  stuk van een bestand, en `wc -l` of `grep -c` als je alleen aantallen nodig hebt. Nooit een heel
+  groot bestand of een brede grep zonder limiet dumpen.
 - Toon vóór elke herstart eerst `git diff` (bij grote diffs `git diff --stat`) en wacht op akkoord.
 - Vóór `sudo systemctl restart accountability-bot` altijd eerst de tests:
   cd {WORKDIR}/accountability-bot && bot_env/bin/python test_<naam>.py
@@ -76,14 +81,14 @@ def ask_llm_sync(chat_id: int, text: str) -> str:
     msgs.append({"role": "user", "content": text})
     r = requests.post(
         f"{API_BASE}/chat/completions",
-        json={"model": "local", "messages": msgs, "temperature": 0.3, "max_tokens": 1500},
+        json={"model": "local", "messages": msgs, "temperature": 0.3, "max_tokens": 8000},
         timeout=600,
     )
     r.raise_for_status()
     reply = r.json()["choices"][0]["message"]["content"]
     msgs.append({"role": "assistant", "content": reply})
-    # geheugen inkorten: system prompt bewaren, oudste paar weggooien
-    while len(msgs) > MAX_HISTORY:
+    # geheugen inkorten op grootte: system prompt bewaren, oudste paar weggooien
+    while len(msgs) > 3 and sum(len(m["content"]) for m in msgs) > MAX_HISTORY_CHARS:
         del msgs[1:3]
     return reply
 
@@ -102,9 +107,17 @@ def run_sync(cmd: str) -> str:
         out += f"\n[exit {p.returncode}]"
     except subprocess.TimeoutExpired:
         out = f"(afgebroken: timeout na {CMD_TIMEOUT}s)"
-    if len(out) > MAX_OUTPUT:
-        out = out[:MAX_OUTPUT] + "\n…(afgekapt)"
+    if len(out) > MAX_OUTPUT_MODEL:
+        out = out[:MAX_OUTPUT_MODEL] + "\n…(afgekapt, gebruik head/grep om gerichter te kijken)"
     return out
+
+
+def for_telegram(out: str) -> str:
+    """Weergave voor de telefoon, in max MAX_TG_MESSAGES berichten; het model krijgt de volledige output."""
+    if len(out) <= MAX_OUTPUT_TG:
+        return out
+    rest = len(out) - MAX_OUTPUT_TG
+    return out[:MAX_OUTPUT_TG] + f"\n…(nog {rest} tekens; het model heeft alles)"
 
 
 async def send_long(msg, text: str, pre: bool = False):
@@ -170,7 +183,7 @@ async def cmd_run(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Gebruik: /run <commando>")
         return
     out = await asyncio.to_thread(run_sync, cmd)
-    await send_long(update.message, out, pre=True)
+    await send_long(update.message, for_telegram(out), pre=True)
 
 
 async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -202,7 +215,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     await q.edit_message_reply_markup(None)
     out = await asyncio.to_thread(run_sync, cmd)
-    await send_long(q.message, out, pre=True)
+    await send_long(q.message, for_telegram(out), pre=True)
 
     # output teruggeven aan het model zodat het de volgende stap kan voorstellen
     chat_id = q.message.chat_id

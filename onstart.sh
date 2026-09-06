@@ -9,7 +9,7 @@ PORT=18081
 REPO="https://github.com/larsakuyper-tech/Qwen-telegram-bot.git"
 LLAMA_BIN=/workspace/llama.cpp/build/bin/llama-server
 
-exec >> /workspace/setup.log 2>&1
+exec > >(tee -a /workspace/setup.log /var/log/portal/onstart.log) 2>&1
 echo "===== onstart $(date) ====="
 
 # Env vars ook zichtbaar in SSH/Jupyter-terminals
@@ -74,7 +74,7 @@ else
   echo "llama-server: starten op poort $PORT"
   nohup "$LLAMA_BIN" \
     -m "$MODEL_FILE" \
-    -ngl 99 -c 32768 --jinja \
+    -ngl 99 -c 131072 -fa on -ctk q8_0 -ctv q8_0 --jinja --reasoning-budget 0 \
     --host 127.0.0.1 --port "$PORT" \
     > /workspace/llama.log 2>&1 &
 fi
