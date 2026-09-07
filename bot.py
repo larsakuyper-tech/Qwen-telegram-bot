@@ -77,6 +77,24 @@ planmodus: set[int] = set()             # chats die in plan-modus staan
 auto_resterend: dict[int, int] = {}     # chat_id -> aantal commando's dat nog automatisch mag
 laatste_finish: dict[int, str] = {}     # chat_id -> finish_reason van het laatste antwoord
 pending: dict[str, str] = {}            # callback-id -> commando
+# Telegram levert een update opnieuw af als een vorige getUpdates werd afgebroken (bv. omdat er even
+# twee bots op hetzelfde token polden). Zonder deze check beantwoordde de bot dezelfde vraag dan tien
+# keer achter elkaar — precies wat er 07-09-2026 in de chat gebeurde.
+gezien: set[int] = set()
+KETTING_MAX = 12                        # auto-uitgevoerde stappen achter elkaar zonder tussenkomst
+
+
+def nieuw_bericht(update: Update) -> bool:
+    uid = getattr(update, "update_id", None)
+    if uid is None:
+        return True
+    if uid in gezien:
+        return False
+    gezien.add(uid)
+    if len(gezien) > 2000:
+        for oud in sorted(gezien)[:1000]:
+            gezien.discard(oud)
+    return True
 
 
 # ---------- veiligheidschecks ----------
@@ -288,8 +306,21 @@ async def send_long(msg, text: str, pre: bool = False):
             await msg.reply_text(chunk)
 
 
-async def offer_commands(msg, cmds: list[str], ctx=None, chat_id=None):
+async def offer_commands(msg, cmds: list[str], ctx=None, chat_id=None, diepte: int = 0):
     for cmd in cmds:
+        # Na KETTING_MAX automatische stappen weer om bevestiging vragen: een model dat blijft
+        # rondlezen ("ls, cat, ls…") loopt anders eindeloos door zonder dat je iets kunt doen.
+        if diepte >= KETTING_MAX:
+            cid = uuid.uuid4().hex[:12]
+            pending[cid] = cmd
+            kb = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Uitvoeren", callback_data=f"run:{cid}"),
+                InlineKeyboardButton("❌ Annuleren", callback_data=f"no:{cid}"),
+            ]])
+            await msg.reply_text(
+                f"\u23f8 {KETTING_MAX} stappen achter elkaar \u2014 even bevestigen:\n"
+                f"<pre>{html.escape(cmd)}</pre>", parse_mode="HTML", reply_markup=kb)
+            return
         auto_over = auto_resterend.get(chat_id, 0) if chat_id is not None else 0
         auto_nu = auto_over > 0 and mag_automatisch(cmd)
         if auto_nu and chat_id is not None:
@@ -312,7 +343,7 @@ async def offer_commands(msg, cmds: list[str], ctx=None, chat_id=None):
                 except Exception as e:
                     await msg.reply_text(f"LLM-fout: {e}")
                     return
-                await handle_model_reply(msg, chat_id, reply, ctx)
+                await handle_model_reply(msg, chat_id, reply, ctx, diepte + 1)
             return
         cid = uuid.uuid4().hex[:12]
         pending[cid] = cmd
@@ -350,7 +381,7 @@ async def handle_model_reply(msg, chat_id: int, reply: str, ctx=None, diepte: in
     if cmds and chat_id in planmodus:
         await msg.reply_text("(plan-modus: commando's niet uitgevoerd — /doe om verder te gaan)")
     elif cmds:
-        await offer_commands(msg, cmds, ctx, chat_id)
+        await offer_commands(msg, cmds, ctx, chat_id, diepte)
     elif chat_id not in planmodus and not afgekapt:
         # aankondiging zonder commando: eenmalig aanporren zodat de keten niet stilvalt
         klaar = any(w in reply.lower() for w in ("klaar", "afgerond", "voltooid", "gereed", "?"))
@@ -495,7 +526,7 @@ async def cmd_run(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not is_allowed(update):
+    if not is_allowed(update) or not nieuw_bericht(update):
         return
     chat_id = update.effective_chat.id
     await ctx.bot.send_chat_action(chat_id, "typing")
@@ -510,7 +541,7 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-    if not is_allowed(update):
+    if not is_allowed(update) or not nieuw_bericht(update):
         return
     action, cid = q.data.split(":", 1)
     cmd = pending.pop(cid, None)
@@ -552,8 +583,9 @@ def main():
     app.add_handler(CommandHandler("stop", cmd_stop))
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
-    print(f"Bot gestart. Werkmap: {WORKDIR}, LLM: {API_BASE}")
-    app.run_polling()
+    print(f"Bot gestart. Werkmap: {WORKDIR}, LLM: {API_BASE}", flush=True)
+    # drop_pending_updates: na een herstart niet alsnog de berichten van uren geleden beantwoorden.
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
